@@ -21,11 +21,17 @@ https://api.schyler.top
 
 ## 前置条件
 
-- 已安装 Go
 - 已安装 Codex
 - 有可用的 `OPENAI_IMAGE_API_KEY`
+- 推荐仓库已经发布 GitHub Release；这样使用者不需要安装 Go
+- 如果仓库还没有 Release，则需要本机安装 Go，让脚本从源码编译
 
-仓库里只需要提交源码和脚本，不需要提交编译后的 `dist/`，别人拉取后直接运行安装脚本即可。
+仓库里只需要提交源码和脚本，不需要提交编译后的 `dist/`。
+
+安装脚本有两种模式：
+
+- 本机有 Go：运行测试并从源码编译
+- 本机没有 Go：自动从 GitHub Releases 下载当前系统的预编译二进制
 
 ## 从 GitHub 拉取后安装
 
@@ -53,11 +59,25 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive -ConfigureCo
 1. 交互式输入 `OPENAI_IMAGE_BASE_URL`
 2. 交互式输入 `OPENAI_IMAGE_API_KEY`
 3. 写入本地 `.env.local`
-4. 执行 `go test ./...`
-5. 编译 MCP 服务到 `dist/`
+4. 如果本机有 Go，执行 `go test ./...` 并编译 MCP 服务到 `dist/`
+5. 如果本机没有 Go，从 GitHub Releases 下载预编译二进制到 `dist/`
 6. 写入 Codex MCP 配置
 
 `.env.local`、`dist/`、`output/` 都已加入 `.gitignore`，不要提交到 GitHub。
+
+如果你想强制使用 GitHub Release 里的预编译二进制，即使本机安装了 Go：
+
+macOS / Linux：
+
+```bash
+./install.sh --interactive --configure-codex --prebuilt
+```
+
+Windows：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive -ConfigureCodex -Prebuilt
+```
 
 如果只想构建，不想写 Codex 配置：
 
@@ -148,6 +168,39 @@ Windows：
 ```powershell
 go build -o .\dist\image2-mcp.exe .\cmd\image2-mcp
 ```
+
+## 发布 GitHub Release
+
+仓库包含 GitHub Actions Release workflow。推送 `v*` tag 后会自动构建：
+
+```text
+darwin/arm64
+darwin/amd64
+linux/arm64
+linux/amd64
+windows/arm64
+windows/amd64
+```
+
+发布方式：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Release 产物命名：
+
+```text
+image2-mcp_darwin_arm64.tar.gz
+image2-mcp_darwin_amd64.tar.gz
+image2-mcp_linux_arm64.tar.gz
+image2-mcp_linux_amd64.tar.gz
+image2-mcp_windows_arm64.zip
+image2-mcp_windows_amd64.zip
+```
+
+如果用户本机没有 Go，安装脚本会根据系统自动下载这些产物。
 
 ## 真实生图测试
 
@@ -247,6 +300,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Help
 --interactive / -Interactive        交互式输入 URL 和 key
 --configure-codex / -ConfigureCodex 写入 Codex MCP 配置
 --base-url / -BaseUrl               指定图片网关地址
+--prebuilt / -Prebuilt              强制下载 GitHub Release 二进制
 --skip-tests / -SkipTests           跳过测试，只构建
 --smoke / -Smoke                    调用真实接口做生图测试
 ```
@@ -255,8 +309,10 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Help
 
 ### 需要提前打包吗？
 
-不需要。别人从 GitHub 拉取源码后，直接运行安装脚本即可。脚本会在本机编译
-`dist/image2-mcp` 或 `dist/image2-mcp.exe`。
+不需要提交打包产物。别人从 GitHub 拉取源码后，直接运行安装脚本即可。
+
+如果你已经发布 GitHub Release，用户不需要安装 Go；脚本会下载预编译二进制。
+如果还没有发布 Release，用户需要安装 Go，让脚本在本机编译。
 
 GitHub 仓库里不要提交 `dist/`。不同系统需要在本机编译自己的二进制。
 

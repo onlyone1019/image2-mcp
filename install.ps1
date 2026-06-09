@@ -2,6 +2,7 @@ param(
   [switch]$Interactive,
   [switch]$ConfigureCodex,
   [string]$BaseUrl = $(if ($env:OPENAI_IMAGE_BASE_URL) { $env:OPENAI_IMAGE_BASE_URL } else { "https://api.schyler.top" }),
+  [switch]$Prebuilt,
   [switch]$SkipTests,
   [switch]$Smoke,
   [switch]$Help
@@ -13,12 +14,13 @@ function Show-Help {
   @"
 Usage: powershell -ExecutionPolicy Bypass -File .\install.ps1 [options]
 
-Build and optionally configure the Image2 MCP server for Codex on Windows.
+Install and optionally configure the Image2 MCP server for Codex on Windows.
 
 Options:
   -Interactive       Prompt for base URL and API key, then write .env.local.
   -ConfigureCodex    Append an image2 MCP server block to ~/.codex/config.toml.
   -BaseUrl URL       Set OPENAI_IMAGE_BASE_URL in .env.local or Codex config.
+  -Prebuilt          Download a GitHub Release binary even when Go is installed.
   -SkipTests         Build without running go test ./...
   -Smoke             Run a real image-generation smoke test after build.
   -Help              Show this help.
@@ -26,6 +28,7 @@ Options:
 Environment:
   OPENAI_IMAGE_API_KEY   Required by Codex at runtime, and required for -Smoke.
   OPENAI_IMAGE_BASE_URL  Optional default base URL; defaults to https://api.schyler.top.
+  IMAGE2_MCP_REPO        Optional GitHub repo slug, for example owner/image2-mcp.
 "@
 }
 
@@ -56,6 +59,46 @@ function Import-DotEnv([string]$Path) {
   }
 }
 
+function Get-GitHubRepoSlug {
+  if ($env:IMAGE2_MCP_REPO) {
+    return $env:IMAGE2_MCP_REPO
+  }
+  try {
+    $Remote = git remote get-url origin 2>$null
+  } catch {
+    $Remote = ""
+  }
+  if ($Remote -match '^git@github\.com:(.+?)(\.git)?$') {
+    return $Matches[1] -replace '\.git$', ''
+  }
+  if ($Remote -match '^https://github\.com/(.+?)(\.git)?$') {
+    return $Matches[1] -replace '\.git$', ''
+  }
+  throw "cannot infer GitHub repo. Set IMAGE2_MCP_REPO=owner/image2-mcp or install Go."
+}
+
+function Get-ArchName {
+  switch ($env:PROCESSOR_ARCHITECTURE) {
+    "AMD64" { return "amd64" }
+    "ARM64" { return "arm64" }
+    default { throw "unsupported architecture for prebuilt download: $env:PROCESSOR_ARCHITECTURE" }
+  }
+}
+
+function Install-Prebuilt {
+  $Repo = Get-GitHubRepoSlug
+  $Arch = Get-ArchName
+  $Asset = "image2-mcp_windows_${Arch}.zip"
+  $Url = "https://github.com/${Repo}/releases/latest/download/${Asset}"
+  $TempDir = New-Item -ItemType Directory -Path (Join-Path ([System.IO.Path]::GetTempPath()) ("image2-mcp-" + [Guid]::NewGuid())) -Force
+  $ZipPath = Join-Path $TempDir.FullName $Asset
+  Write-Host "==> Downloading prebuilt binary: $Url"
+  Invoke-WebRequest -Uri $Url -OutFile $ZipPath
+  New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+  Expand-Archive -Path $ZipPath -DestinationPath "dist" -Force
+  Remove-Item -Recurse -Force $TempDir
+}
+
 if ($Help) {
   Show-Help
   exit 0
@@ -63,10 +106,6 @@ if ($Help) {
 
 $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $RepoDir
-
-if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
-  throw "go is required but was not found in PATH"
-}
 
 if ($Interactive) {
   Write-Host "==> Interactive configuration"
@@ -108,15 +147,25 @@ if ($env:OPENAI_IMAGE_BASE_URL) {
 
 New-Item -ItemType Directory -Force -Path "dist" | Out-Null
 
-if (-not $SkipTests) {
-  Write-Host "==> Running tests"
-  go test ./...
+$GoAvailable = [bool](Get-Command go -ErrorAction SilentlyContinue)
+if ($Prebuilt -or -not $GoAvailable) {
+  if (-not $GoAvailable -and -not $SkipTests) {
+    Write-Host "==> Go is not installed; skipping source tests and using prebuilt binary"
+  }
+  Install-Prebuilt
+} else {
+  if (-not $SkipTests) {
+    Write-Host "==> Running tests"
+    go test ./...
+  }
+  Write-Host "==> Building dist/image2-mcp.exe"
+  go build -o ".\dist\image2-mcp.exe" ".\cmd\image2-mcp"
 }
 
-Write-Host "==> Building dist/image2-mcp.exe"
-go build -o ".\dist\image2-mcp.exe" ".\cmd\image2-mcp"
-
 if ($Smoke) {
+  if (-not $GoAvailable) {
+    throw "-Smoke currently requires Go because it runs go test"
+  }
   if (-not $env:OPENAI_IMAGE_API_KEY -and -not (Test-Path ".env.local")) {
     throw "-Smoke requires OPENAI_IMAGE_API_KEY or .env.local"
   }
