@@ -112,6 +112,22 @@ if [[ "$interactive" -eq 1 ]]; then
   echo "==> Wrote local environment file: ${repo_dir}/.env.local"
 fi
 
+if [[ -f "${repo_dir}/.env.local" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${repo_dir}/.env.local"
+  set +a
+fi
+if [[ -f "${repo_dir}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "${repo_dir}/.env"
+  set +a
+fi
+if [[ -n "${OPENAI_IMAGE_BASE_URL:-}" ]]; then
+  base_url="${OPENAI_IMAGE_BASE_URL}"
+fi
+
 if [[ "$run_tests" -eq 1 ]]; then
   echo "==> Running tests"
   go test ./...

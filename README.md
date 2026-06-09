@@ -29,6 +29,9 @@ https://api.schyler.top
 
 ## 从 GitHub 拉取后安装
 
+推荐使用交互式安装。安装过程中输入的 key 会保存到本地 `.env.local`，
+不会写入 Codex 配置，也不会提交到 GitHub。
+
 ### macOS / Linux
 
 ```bash
@@ -56,6 +59,34 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive -ConfigureCo
 
 `.env.local`、`dist/`、`output/` 都已加入 `.gitignore`，不要提交到 GitHub。
 
+如果只想构建，不想写 Codex 配置：
+
+macOS / Linux：
+
+```bash
+./install.sh --interactive
+```
+
+Windows：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive
+```
+
+如果已经配置过 `.env.local`，后续只想重新构建：
+
+macOS / Linux：
+
+```bash
+./install.sh
+```
+
+Windows：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
 ## 本地配置
 
 交互式安装会生成 `.env.local`：
@@ -67,6 +98,18 @@ OPENAI_IMAGE_API_KEY="sk-your-key"
 
 Codex 配置里不会直接保存 key。启动 MCP 时，runner 脚本会读取本地
 `.env.local`。
+
+如果要换 key 或 URL，重新运行交互式安装即可：
+
+```bash
+./install.sh --interactive
+```
+
+Windows：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive
+```
 
 ## Codex MCP 配置
 
@@ -88,6 +131,9 @@ args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\path\\to\\imag
 ```
 
 安装完成后，重启 Codex 或开启新会话，让 Codex 重新加载 MCP 配置。
+
+如果 `~/.codex/config.toml` 已经存在 `[mcp_servers.image2]`，安装脚本不会覆盖它。
+这种情况下如果你移动了项目目录，需要手动更新里面的 runner 路径。
 
 ## 手动构建
 
@@ -123,6 +169,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Interactive -ConfigureCo
 output/imagegen/mcp-smoke-test.png
 ```
 
+注意：`--smoke` 会真实调用一次图片接口，可能消耗额度。
+
 ## Codex 里怎么调用
 
 MCP 工具名：
@@ -156,6 +204,18 @@ output_name  可选，图片文件名；不传则自动生成 image2-时间戳.p
 - 不传：保存到默认目录 `output/imagegen/`
 - 传绝对路径：保存到该目录
 - 传相对路径：直接报错，不会调用生图接口
+
+macOS 绝对路径示例：
+
+```text
+/Users/you/Desktop/images
+```
+
+Windows 绝对路径示例：
+
+```text
+C:\Users\you\Desktop\images
+```
 
 返回示例：
 
@@ -198,6 +258,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Help
 不需要。别人从 GitHub 拉取源码后，直接运行安装脚本即可。脚本会在本机编译
 `dist/image2-mcp` 或 `dist/image2-mcp.exe`。
 
+GitHub 仓库里不要提交 `dist/`。不同系统需要在本机编译自己的二进制。
+
 ### 为什么 key 不写进 Codex config？
 
 为了避免泄漏。Codex config 只保存 runner 路径，真实 key 放在本地
@@ -206,6 +268,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Help
 ### Codex 看不到 generate_image2 怎么办？
 
 确认 `~/.codex/config.toml` 里有 `[mcp_servers.image2]`，然后重启 Codex 或开启新会话。
+
+如果你已经配置过但后来移动了项目目录，检查 config 里的 runner 路径是否还是旧路径。
 
 ### 生图失败怎么办？
 
