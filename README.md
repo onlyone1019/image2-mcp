@@ -155,6 +155,23 @@ args = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "C:\\path\\to\\imag
 如果 `~/.codex/config.toml` 已经存在 `[mcp_servers.image2]`，安装脚本不会覆盖它。
 这种情况下如果你移动了项目目录，需要手动更新里面的 runner 路径。
 
+如果你想让脚本覆盖已有的 `[mcp_servers.image2]` 配置：
+
+macOS / Linux：
+
+```bash
+./install.sh --configure-codex --force-config
+```
+
+Windows：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -ForceConfig
+```
+
+`--force-config` / `-ForceConfig` 会删除旧的 `[mcp_servers.image2]` 配置块，
+再写入当前项目路径对应的新配置。
+
 ## 手动构建
 
 macOS / Linux：
@@ -299,6 +316,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -Help
 ```text
 --interactive / -Interactive        交互式输入 URL 和 key
 --configure-codex / -ConfigureCodex 写入 Codex MCP 配置
+--force-config / -ForceConfig       覆盖已有 image2 MCP 配置
 --base-url / -BaseUrl               指定图片网关地址
 --prebuilt / -Prebuilt              强制下载 GitHub Release 二进制
 --skip-tests / -SkipTests           跳过测试，只构建

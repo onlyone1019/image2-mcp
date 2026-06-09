@@ -1,6 +1,7 @@
 param(
   [switch]$Interactive,
   [switch]$ConfigureCodex,
+  [switch]$ForceConfig,
   [string]$BaseUrl = $(if ($env:OPENAI_IMAGE_BASE_URL) { $env:OPENAI_IMAGE_BASE_URL } else { "https://api.schyler.top" }),
   [switch]$Prebuilt,
   [switch]$SkipTests,
@@ -19,6 +20,7 @@ Install and optionally configure the Image2 MCP server for Codex on Windows.
 Options:
   -Interactive       Prompt for base URL and API key, then write .env.local.
   -ConfigureCodex    Append an image2 MCP server block to ~/.codex/config.toml.
+  -ForceConfig       Replace existing [mcp_servers.image2] config block.
   -BaseUrl URL       Set OPENAI_IMAGE_BASE_URL in .env.local or Codex config.
   -Prebuilt          Download a GitHub Release binary even when Go is installed.
   -SkipTests         Build without running go test ./...
@@ -99,6 +101,25 @@ function Install-Prebuilt {
   Remove-Item -Recurse -Force $TempDir
 }
 
+function Remove-Image2ConfigBlock([string]$ConfigFile) {
+  $Lines = Get-Content $ConfigFile
+  $Out = New-Object System.Collections.Generic.List[string]
+  $Skip = $false
+  foreach ($Line in $Lines) {
+    if ($Line -match '^\[mcp_servers\.image2\]$') {
+      $Skip = $true
+      continue
+    }
+    if ($Line -match '^\[' -and $Skip) {
+      $Skip = $false
+    }
+    if (-not $Skip) {
+      $Out.Add($Line)
+    }
+  }
+  Set-Content -Path $ConfigFile -Value $Out -Encoding UTF8
+}
+
 if ($Help) {
   Show-Help
   exit 0
@@ -175,6 +196,10 @@ if ($Smoke) {
   go test ./internal/image2 -run TestRealGenerateImage2Smoke -count=1 -v
 }
 
+if ($ForceConfig) {
+  $ConfigureCodex = $true
+}
+
 if ($ConfigureCodex) {
   $ConfigDir = Join-Path $HOME ".codex"
   $ConfigFile = Join-Path $ConfigDir "config.toml"
@@ -184,10 +209,15 @@ if ($ConfigureCodex) {
   }
 
   $Existing = Get-Content $ConfigFile -Raw
-  if ($Existing -match '(?m)^\[mcp_servers\.image2\]') {
+  if ($Existing -match '(?m)^\[mcp_servers\.image2\]' -and -not $ForceConfig) {
     Write-Host "==> Codex MCP config already contains [mcp_servers.image2]; leaving it unchanged: $ConfigFile"
   } else {
-    Write-Host "==> Adding image2 MCP config to $ConfigFile"
+    if ($Existing -match '(?m)^\[mcp_servers\.image2\]') {
+      Write-Host "==> Replacing existing image2 MCP config in $ConfigFile"
+      Remove-Image2ConfigBlock $ConfigFile
+    } else {
+      Write-Host "==> Adding image2 MCP config to $ConfigFile"
+    }
     $RunScript = (Join-Path $RepoDir "scripts\run-image2-mcp.ps1") -replace '\\', '\\'
     Add-Content -Path $ConfigFile -Value @"
 

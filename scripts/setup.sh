@@ -8,6 +8,7 @@ interactive=0
 run_tests=1
 run_smoke=0
 prefer_prebuilt=0
+force_config=0
 
 usage() {
   cat <<'EOF'
@@ -18,6 +19,7 @@ Install and optionally configure the Image2 MCP server for Codex.
 Options:
   --interactive          Prompt for base URL and API key, then write .env.local.
   --configure-codex      Append an image2 MCP server block to ~/.codex/config.toml.
+  --force-config         Replace existing [mcp_servers.image2] config block.
   --base-url URL         Set OPENAI_IMAGE_BASE_URL in the Codex MCP config.
   --prebuilt             Download a GitHub Release binary even when Go is installed.
   --skip-tests           Build without running go test ./...
@@ -109,9 +111,29 @@ download_prebuilt() {
   rm -rf "$tmp"
 }
 
+remove_image2_config_block() {
+  local config_file="$1"
+  awk '
+    BEGIN { skip = 0 }
+    /^\[mcp_servers\.image2\]$/ { skip = 1; next }
+    /^\[/ {
+      if (skip == 1) {
+        skip = 0
+      }
+    }
+    skip == 0 { print }
+  ' "$config_file" > "${config_file}.tmp"
+  mv "${config_file}.tmp" "$config_file"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --configure-codex)
+      configure_codex=1
+      shift
+      ;;
+    --force-config)
+      force_config=1
       configure_codex=1
       shift
       ;;
@@ -246,10 +268,15 @@ if [[ "$configure_codex" -eq 1 ]]; then
   mkdir -p "$config_dir"
   touch "$config_file"
 
-  if grep -q '^\[mcp_servers\.image2\]' "$config_file"; then
+  if grep -q '^\[mcp_servers\.image2\]' "$config_file" && [[ "$force_config" -eq 0 ]]; then
     echo "==> Codex MCP config already contains [mcp_servers.image2]; leaving it unchanged: $config_file"
   else
-    echo "==> Adding image2 MCP config to $config_file"
+    if grep -q '^\[mcp_servers\.image2\]' "$config_file"; then
+      echo "==> Replacing existing image2 MCP config in $config_file"
+      remove_image2_config_block "$config_file"
+    else
+      echo "==> Adding image2 MCP config to $config_file"
+    fi
     cat >> "$config_file" <<EOF
 
 [mcp_servers.image2]
