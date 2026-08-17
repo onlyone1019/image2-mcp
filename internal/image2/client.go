@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +23,7 @@ const (
 	DefaultBaseURL = "https://api.schyler.top"
 	DefaultModel   = "gpt-image-2"
 	DefaultSize    = "1024x1024"
+	DefaultQuality = "auto"
 )
 
 var safeNameRE = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
@@ -49,6 +52,7 @@ type GenerateResult struct {
 type EditRequest struct {
 	Prompt     string   `json:"prompt"`
 	Size       string   `json:"size,omitempty"`
+	Quality    string   `json:"quality,omitempty"`
 	OutputDir  string   `json:"output_dir,omitempty"`
 	OutputName string   `json:"output_name,omitempty"`
 	ImagePaths []string `json:"image_paths"`
@@ -97,43 +101,25 @@ func New(apiKey, baseURL, outputDir string, httpClient *http.Client) (*Client, e
 }
 
 func BuildGenerationsEndpoint(baseURL string) string {
-	u := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if strings.HasSuffix(u, "/v1/images/generations") {
-		return u
-	}
-	if strings.HasSuffix(u, "/v1/images/edits") {
-		return strings.TrimSuffix(u, "/edits") + "/generations"
-	}
-	if strings.HasSuffix(u, "/images/generations") {
-		return u
-	}
-	if strings.HasSuffix(u, "/images/edits") {
-		return strings.TrimSuffix(u, "/edits") + "/generations"
-	}
-	if strings.HasSuffix(u, "/v1") {
-		return u + "/images/generations"
-	}
-	return u + "/v1/images/generations"
+	return buildImagesEndpoint(baseURL, "generations")
 }
 
 func BuildEditsEndpoint(baseURL string) string {
+	return buildImagesEndpoint(baseURL, "edits")
+}
+
+func buildImagesEndpoint(baseURL, operation string) string {
 	u := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if strings.HasSuffix(u, "/v1/images/edits") {
-		return u
-	}
-	if strings.HasSuffix(u, "/v1/images/generations") {
-		return strings.TrimSuffix(u, "/generations") + "/edits"
-	}
-	if strings.HasSuffix(u, "/images/edits") {
-		return u
-	}
-	if strings.HasSuffix(u, "/images/generations") {
-		return strings.TrimSuffix(u, "/generations") + "/edits"
+	for _, existing := range []string{"generations", "edits"} {
+		suffix := "/images/" + existing
+		if strings.HasSuffix(u, suffix) {
+			return strings.TrimSuffix(u, suffix) + "/images/" + operation
+		}
 	}
 	if strings.HasSuffix(u, "/v1") {
-		return u + "/images/edits"
+		return u + "/images/" + operation
 	}
-	return u + "/v1/images/edits"
+	return u + "/v1/images/" + operation
 }
 
 func (c *Client) Generate(ctx context.Context, input GenerateRequest) (GenerateResult, error) {
@@ -195,6 +181,10 @@ func (c *Client) Edit(ctx context.Context, input EditRequest) (EditResult, error
 	if size == "" {
 		size = DefaultSize
 	}
+	quality := strings.TrimSpace(input.Quality)
+	if quality == "" {
+		quality = DefaultQuality
+	}
 	outputDir := strings.TrimSpace(input.OutputDir)
 	if outputDir == "" {
 		outputDir = c.outputDir
@@ -203,62 +193,65 @@ func (c *Client) Edit(ctx context.Context, input EditRequest) (EditResult, error
 	}
 
 	var imagePaths []string
-	for _, p := range input.ImagePaths {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			imagePaths = append(imagePaths, p)
+	for _, path := range input.ImagePaths {
+		path = strings.TrimSpace(path)
+		if path != "" {
+			imagePaths = append(imagePaths, path)
 		}
 	}
 	if len(imagePaths) == 0 {
 		return EditResult{}, errors.New("at least one image path is required")
 	}
-	for _, p := range imagePaths {
-		if !filepath.IsAbs(p) {
-			return EditResult{}, fmt.Errorf("image path must be an absolute path: %s", p)
+	for _, path := range imagePaths {
+		if !filepath.IsAbs(path) {
+			return EditResult{}, fmt.Errorf("image path must be an absolute path: %s", path)
 		}
-		if _, err := os.Stat(p); err != nil {
-			return EditResult{}, fmt.Errorf("image file not found: %s: %w", p, err)
+		if err := requireRegularFile(path, "image"); err != nil {
+			return EditResult{}, err
 		}
 	}
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	_ = writer.WriteField("model", DefaultModel)
-	_ = writer.WriteField("prompt", prompt)
-	_ = writer.WriteField("size", size)
-	_ = writer.WriteField("n", "1")
-	_ = writer.WriteField("response_format", "b64_json")
-	for _, p := range imagePaths {
-		imgBytes, err := os.ReadFile(p)
-		if err != nil {
-			return EditResult{}, fmt.Errorf("read image %s: %w", p, err)
-		}
-		part, err := writer.CreateFormFile("image[]", filepath.Base(p))
-		if err != nil {
-			return EditResult{}, fmt.Errorf("create form file: %w", err)
-		}
-		if _, err := part.Write(imgBytes); err != nil {
-			return EditResult{}, fmt.Errorf("write image to form: %w", err)
-		}
-	}
 	maskPath := strings.TrimSpace(input.MaskPath)
 	if maskPath != "" {
 		if !filepath.IsAbs(maskPath) {
 			return EditResult{}, errors.New("mask_path must be an absolute path")
 		}
-		maskBytes, err := os.ReadFile(maskPath)
-		if err != nil {
-			return EditResult{}, fmt.Errorf("read mask: %w", err)
-		}
-		part, err := writer.CreateFormFile("mask", filepath.Base(maskPath))
-		if err != nil {
-			return EditResult{}, fmt.Errorf("create mask form file: %w", err)
-		}
-		if _, err := part.Write(maskBytes); err != nil {
-			return EditResult{}, fmt.Errorf("write mask to form: %w", err)
+		if err := requireRegularFile(maskPath, "mask"); err != nil {
+			return EditResult{}, err
 		}
 	}
-	writer.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	fields := []struct {
+		name  string
+		value string
+	}{
+		{name: "model", value: DefaultModel},
+		{name: "prompt", value: prompt},
+		{name: "size", value: size},
+		{name: "quality", value: quality},
+		{name: "n", value: "1"},
+		{name: "response_format", value: "b64_json"},
+	}
+	for _, field := range fields {
+		if err := writer.WriteField(field.name, field.value); err != nil {
+			return EditResult{}, fmt.Errorf("write multipart field %s: %w", field.name, err)
+		}
+	}
+	for _, path := range imagePaths {
+		if err := writeMultipartFile(writer, "image[]", path); err != nil {
+			return EditResult{}, err
+		}
+	}
+	if maskPath != "" {
+		if err := writeMultipartFile(writer, "mask", maskPath); err != nil {
+			return EditResult{}, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return EditResult{}, fmt.Errorf("finalize multipart image edit: %w", err)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.editsEndpoint, &body)
 	if err != nil {
@@ -269,7 +262,7 @@ func (c *Client) Edit(ctx context.Context, input EditRequest) (EditResult, error
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return EditResult{}, fmt.Errorf("request image generation: %w", err)
+		return EditResult{}, fmt.Errorf("request image edit: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -283,8 +276,50 @@ func (c *Client) Edit(ctx context.Context, input EditRequest) (EditResult, error
 	return saveImageResponse(respBody, size, outputDir, input.OutputName)
 }
 
-func saveImageResponse(respBody []byte, size, outputDir, outputName string) (GenerateResult, error) {
+func requireRegularFile(path, kind string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s file not found: %s: %w", kind, path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%s path must be a regular file: %s", kind, path)
+	}
+	return nil
+}
 
+func writeMultipartFile(writer *multipart.Writer, fieldName, path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	header := make([]byte, 512)
+	n, err := file.Read(header)
+	if err != nil && err != io.EOF {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind %s: %w", path, err)
+	}
+	disposition := mime.FormatMediaType("form-data", map[string]string{
+		"name":     fieldName,
+		"filename": filepath.Base(path),
+	})
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {disposition},
+		"Content-Type":        {http.DetectContentType(header[:n])},
+	})
+	if err != nil {
+		return fmt.Errorf("create multipart file for %s: %w", path, err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return fmt.Errorf("write multipart file for %s: %w", path, err)
+	}
+	return nil
+}
+
+func saveImageResponse(respBody []byte, size, outputDir, outputName string) (GenerateResult, error) {
 	var parsed struct {
 		Data []struct {
 			B64JSON string `json:"b64_json"`

@@ -246,13 +246,42 @@ output/imagegen/mcp-smoke-test.png
 
 注意：`--smoke` 会真实调用一次图片接口，可能消耗额度。
 
+要单独验证图生图接口，需要指定一张本地参考图的绝对路径：
+
+```bash
+RUN_IMAGE2_EDIT_SMOKE=1 \
+IMAGE2_EDIT_INPUT="/Users/you/Desktop/reference.png" \
+go test ./internal/image2 -run TestRealEditImage2Smoke -count=1 -v
+```
+
+该测试会生成：
+
+```text
+output/imagegen/mcp-edit-smoke-test.png
+```
+
+多图真实测试使用系统路径分隔符连接两张或更多图片。macOS / Linux 示例：
+
+```bash
+RUN_IMAGE2_EDIT_MULTI_SMOKE=1 \
+IMAGE2_EDIT_INPUTS="/Users/you/Desktop/subject.png:/Users/you/Desktop/style.png" \
+go test ./internal/image2 -run TestRealEditImage2MultiSmoke -count=1 -v
+```
+
+该测试会生成：
+
+```text
+output/imagegen/mcp-edit-multi-smoke-test.png
+```
+
 ## Codex 里怎么调用
+
+### 文生图
 
 MCP 工具名：
 
 ```text
 generate_image2
-edit_image2
 ```
 
 入参示例：
@@ -303,7 +332,7 @@ C:\Users\you\Desktop\images
 }
 ```
 
-### edit_image2
+### 图生图
 
 调用接口：
 
@@ -319,9 +348,23 @@ Content-Type: multipart/form-data
   "prompt": "Add a cat sitting on the desk",
   "image_paths": ["/Users/you/Desktop/images/desk.png"],
   "size": "1024x1024",
+  "quality": "auto",
   "mask_path": "/Users/you/Desktop/images/mask.png",
   "output_dir": "/Users/you/Desktop/images",
   "output_name": "desk-with-cat.png"
+}
+```
+
+多图输入时，数组顺序会原样保留：
+
+```json
+{
+  "prompt": "以第一张图为主体，以第二张图为服装和配色参考",
+  "image_paths": [
+    "/Users/you/Desktop/images/subject.png",
+    "/Users/you/Desktop/images/style.jpg"
+  ],
+  "output_name": "combined.png"
 }
 ```
 
@@ -331,6 +374,7 @@ Content-Type: multipart/form-data
 prompt       必填，编辑提示词
 image_paths  必填，源图片绝对路径列表，至少一个
 size         可选，默认 1024x1024
+quality      可选，默认 auto
 mask_path    可选，蒙版图片绝对路径
 output_dir   可选，图片保存目录；如果传入，必须是绝对路径
 output_name  可选，图片文件名；不传则自动生成 image2-时间戳.png
@@ -339,7 +383,8 @@ output_name  可选，图片文件名；不传则自动生成 image2-时间戳.p
 `image_paths` 规则：
 
 - 至少传一个路径
-- 每个路径必须是绝对路径且文件存在
+- 每个路径必须是绝对路径、文件存在且为普通文件
+- 多图会按数组顺序上传
 
 `mask_path` 规则：
 
@@ -412,5 +457,6 @@ GitHub 仓库里不要提交 `dist/`。不同系统需要在本机编译自己�
 
 - `OPENAI_IMAGE_API_KEY` 是否正确
 - `OPENAI_IMAGE_BASE_URL` 是否可访问
+- `image_paths` 是否全部为本地绝对路径，且文件存在
 - `output_dir` 是否是绝对路径
 - 目标保存目录是否有写入权限

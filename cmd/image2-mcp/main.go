@@ -22,8 +22,9 @@ type generateParams struct {
 
 type editParams struct {
 	Prompt     string   `json:"prompt" jsonschema:"Image prompt for the edit."`
-	ImagePaths []string `json:"image_paths" jsonschema:"Absolute paths to source PNG images. At least one required."`
+	ImagePaths []string `json:"image_paths" jsonschema:"Absolute paths to source images, preserved in request order. At least one required."`
 	Size       string   `json:"size,omitempty" jsonschema:"Image size, defaults to 1024x1024."`
+	Quality    string   `json:"quality,omitempty" jsonschema:"Image quality, defaults to auto."`
 	OutputDir  string   `json:"output_dir,omitempty" jsonschema:"Optional absolute directory to save the PNG."`
 	OutputName string   `json:"output_name,omitempty" jsonschema:"Optional PNG file name. Defaults to image2-{timestamp}.png."`
 	MaskPath   string   `json:"mask_path,omitempty" jsonschema:"Optional absolute path to a mask PNG."`
@@ -83,7 +84,7 @@ func newServer(projectRoot, outputDir string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "edit_image2",
-		Description: "Edit one or more PNG images using gpt-image-2 with an optional mask and save the result locally.",
+		Description: "Edit one or more local images using gpt-image-2 with an optional mask and save the result locally.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, params editParams) (*mcp.CallToolResult, image2.EditResult, error) {
 		client, err := image2.NewFromEnv(outputDir)
 		if err != nil {
@@ -92,6 +93,7 @@ func newServer(projectRoot, outputDir string) *mcp.Server {
 		result, err := client.Edit(ctx, image2.EditRequest{
 			Prompt:     params.Prompt,
 			Size:       params.Size,
+			Quality:    params.Quality,
 			OutputDir:  params.OutputDir,
 			OutputName: params.OutputName,
 			ImagePaths: params.ImagePaths,
